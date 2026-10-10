@@ -128,3 +128,15 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+REST_FRAMEWORK = {
+    'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAdminUser'],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+}
+
+# --- Job queue settings ---
+JOB_DEFAULT_MAX_ATTEMPTS = 3
+JOB_BACKOFF_BASE_SECONDS = 5      # delay = base * 2 ** (attempt - 1)
+JOB_BACKOFF_MAX_SECONDS = 300
+JOB_STALE_RUNNING_SECONDS = 120   # running jobs older than this are treated as crashed
