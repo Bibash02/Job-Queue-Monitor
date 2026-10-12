@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="refresh" content="5">
+<title>Job Queue Monitor</title>
+<style>
+  :root { --bg:#f8fafc; --card:#fff; --text:#0f172a; --muted:#64748b; --line:#e2e8f0;
+          --pending:#6b7280; --running:#2563eb; --retrying:#d97706; --succeeded:#16a34a;
+          --failed:#dc2626; --cancelled:#9ca3af; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f172a; --card:#1e293b; --text:#f1f5f9; --muted:#94a3b8; --line:#334155; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px 16px; background:var(--bg); color:var(--text);
+         font:14px/1.5 system-ui, sans-serif; }
+  .wrap { max-width:1100px; margin:0 auto; }
+  header { display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:8px; }
+  h1 { margin:0 0 4px; font-size:22px; }
+  .muted { color:var(--muted); }
+  a { color:var(--running); }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:12px; margin:16px 0; }
+  .tile { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px;
+          border-top:4px solid var(--c, var(--line)); text-decoration:none; color:inherit; }
+  .tile .n { font-size:26px; font-weight:700; }
+  .tile .l { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  .tile.active { outline:2px solid var(--running); }
+  form.filters { display:flex; gap:8px; margin:8px 0 12px; flex-wrap:wrap; }
+  select, button { padding:6px 10px; border:1px solid var(--line); border-radius:6px;
+                   background:var(--card); color:var(--text); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; overflow-x:auto; margin-bottom:20px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:8px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  td.err { white-space:normal; max-width:340px; color:var(--failed); }
+  th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; }
+  tr:last-child td { border-bottom:none; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:999px; color:#fff; font-size:12px;
+           font-weight:600; background:var(--c); }
+  h2 { font-size:16px; margin:20px 0 8px; }
+  .empty { padding:20px; text-align:center; color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Job Queue Monitor</h1>
+      <div class="muted">Auto-refreshes every 5s · success rate:
+        {% if stats.success_rate is None %}n/a{% else %}{{ stats.success_rate }}%{% endif %}
+        · jobs that needed retries: {{ stats.retried_jobs }}</div>
+    </div>
+    <div><a href="/admin/jobs/job/">Admin</a> · <a href="/api/jobs/">API</a></div>
+  </header>
+
+  <div class="tiles">
+    <a class="tile" href="?" style="--c:var(--line)"><div class="n">{{ stats.total }}</div><div class="l">Total</div></a>
+    {% for value, label in statuses %}
+      <a class="tile {% if status_filter == value %}active{% endif %}" href="?status={{ value }}" style="--c:var(--{{ value }})">
+        <div class="n">{% for k, v in stats.by_status.items %}{% if k == value %}{{ v }}{% endif %}{% endfor %}</div>
+        <div class="l">{{ label }}</div>
+      </a>
+    {% endfor %}
+  </div>
+
+  <form class="filters" method="get">
+    <select name="status">
+      <option value="">All statuses</option>
+      {% for value, label in statuses %}<option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <select name="job_type">
+      <option value="">All types</option>
+      {% for value, label in types %}<option value="{{ value }}" {% if type_filter == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    <button type="submit">Filter</button>
+  </form>
+
+  {% if failing %}
+  <h2>Needs attention</h2>
+  <div class="card"><table>
+    <tr><th>ID</th><th>Type</th><th>Status</th><th>Attempts</th><th>Next run</th><th>Error</th></tr>
+    {% for j in failing %}
+    <tr>
+      <td><a href="/admin/jobs/job/{{ j.id }}/change/">#{{ j.id }}</a></td>
+      <td>{{ j.job_type }}</td>
+      <td><span class="badge" style="--c:var(--{{ j.status }})">{{ j.get_status_display }}</span></td>
+      <td>{{ j.attempts }}/{{ j.max_attempts }}</td>
+      <td>{% if j.status == "retrying" %}{{ j.next_run_at|date:"H:i:s" }}{% else %}—{% endif %}</td>
+      <td class="err">{{ j.error_message }}</td>
+    </tr>
+    {% endfor %}
+  </table></div>
+  {% endif %}
+
+  <h2>Recent jobs</h2>
+  <div class="card">
+  {% if jobs %}
+  <table>
+    <tr><th>ID</th><th>Type</th><th>Status</th><th>Attempts</th><th>Created</th><th>Started</th><th>Finished</th><th>Duration</th></tr>
+    {% for j in jobs %}
+    <tr>
+      <td><a href="/admin/jobs/job/{{ j.id }}/change/">#{{ j.id }}</a></td>
+      <td>{{ j.job_type }}</td>
+      <td><span class="badge" style="--c:var(--{{ j.status }})">{{ j.get_status_display }}</span></td>
+      <td>{{ j.attempts }}/{{ j.max_attempts }}</td>
+      <td>{{ j.created_at|date:"H:i:s" }}</td>
+      <td>{{ j.started_at|date:"H:i:s"|default:"—" }}</td>
+      <td>{{ j.finished_at|date:"H:i:s"|default:"—" }}</td>
+      <td>{% if j.duration %}{{ j.duration }}s{% else %}—{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}<div class="empty">No jobs match. Run <code>python manage.py seed_jobs</code>.</div>{% endif %}
+  </div>
+</div>
+</body>
+</html>
